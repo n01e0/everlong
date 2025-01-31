@@ -7,7 +7,7 @@ use std::env;
 use std::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use std::process::{Stdio, Output};
+use std::process::{Stdio, ExitStatus};
 
 #[derive(Parser)]
 struct Args {
@@ -55,7 +55,7 @@ async fn send_notification(webhook_url: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
-async fn exec_command(cmd: &[String]) -> Result<Output> {
+async fn exec_command(cmd: &[String]) -> Result<(String, String, ExitStatus)> {
     let shell = env::var("SHELL").unwrap_or(String::from("/bin/sh"));
     let command_str = cmd.join(" ");
 
@@ -74,24 +74,31 @@ async fn exec_command(cmd: &[String]) -> Result<Output> {
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
 
+    let mut stdout_output = String::new();
+    let mut stderr_output = String::new();
 
     let stdout_task = tokio::spawn(async move {
         while let Some(line) = stdout_reader.next_line().await.unwrap() {
             println!("{}", line);
+            stdout_output.push_str(&line);
+            stdout_output.push('\n');
         }
+        stdout_output
     });
     let stderr_task = tokio::spawn(async move {
         while let Some(line) = stderr_reader.next_line().await.unwrap() {
             eprintln!("{}", line);
+            stderr_output.push_str(&line);
+            stderr_output.push('\n');
         }
-
+        stderr_output
     });
 
-    let result = child.wait_with_output().await.with_context(|| "Failed to wait child shell");
-    stdout_task.await?;
-    stderr_task.await?;
-
-    result
+    let status = child.wait().await.with_context(|| "Failed to wait child shell")?;
+    let stdout_output = stdout_task.await?;
+    let stderr_output = stderr_task.await?;
+    
+    Ok((stdout_output, stderr_output, status))
 
 }
 
@@ -107,12 +114,10 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = load_config()?;
 
-    let output = exec_command(&args.command).await?;
+    let (stdout, stderr, status)= exec_command(&args.command).await?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    let message = if output.status.success() {
+    let message = if status.success() {
         substitute_variables(
             &config.success_message,
             &args.command.join(" "),
