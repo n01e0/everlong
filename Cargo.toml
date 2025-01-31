@@ -2,6 +2,11 @@
 name = "everlong"
 version = "0.1.0"
 edition = "2021"
+authors = ["n01e0 <reoshiseki@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/n01e0/everlong"
+description = "notify when command exited"
 
 [dependencies]
 anyhow = "1.0.95"
