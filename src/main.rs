@@ -5,7 +5,9 @@ use serde::Deserialize;
 use serde_yaml::from_reader;
 use std::env;
 use std::fs::File;
-use std::process::{Command, Output, Stdio};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use std::process::{Stdio, Output};
 
 #[derive(Parser)]
 struct Args {
@@ -53,20 +55,44 @@ async fn send_notification(webhook_url: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
-fn exec_command(cmd: &[String]) -> Result<Output> {
+async fn exec_command(cmd: &[String]) -> Result<Output> {
     let shell = env::var("SHELL").unwrap_or(String::from("/bin/sh"));
     let command_str = cmd.join(" ");
 
-    Command::new(shell)
+    let mut child = Command::new(shell)
         .arg("-c")
         .arg(&command_str)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped())
         .spawn()
-        .with_context(|| "Failed to spawn shell")?
-        .wait_with_output()
-        .with_context(|| "Failed to wait shell")
+        .with_context(|| "Failed to spawn shell")?;
+
+    let stdout = child.stdout.take().with_context(|| "Failed to take stdout")?;
+    let stderr = child.stderr.take().with_context(|| "Failed to take stderr")?;
+
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+
+
+    let stdout_task = tokio::spawn(async move {
+        while let Some(line) = stdout_reader.next_line().await.unwrap() {
+            println!("{}", line);
+        }
+    });
+    let stderr_task = tokio::spawn(async move {
+        while let Some(line) = stderr_reader.next_line().await.unwrap() {
+            eprintln!("{}", line);
+        }
+
+    });
+
+    let result = child.wait_with_output().await.with_context(|| "Failed to wait child shell");
+    stdout_task.await?;
+    stderr_task.await?;
+
+    result
+
 }
 
 fn substitute_variables(message: &str, command: &str, stdout: &str, stderr: &str) -> String {
@@ -81,7 +107,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = load_config()?;
 
-    let output = exec_command(&args.command)?;
+    let output = exec_command(&args.command).await?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
