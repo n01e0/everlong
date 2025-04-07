@@ -12,7 +12,7 @@ description = "notify when command exited"
 anyhow = "1.0.97"
 clap = { version = "4.5.35", features = ["derive"] }
 reqwest = { version = "0.12.12", features = ["json"] }
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_yaml = "0.9.34"
 tokio = { version = "1.44.2", features = ["full"] }
